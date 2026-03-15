@@ -4,18 +4,21 @@ import { hash } from 'argon2';
 import { PrismaService } from '@/src/core/prisma/prisma.service';
 
 import { CreateUserInput } from './inputs/create-user.input';
+import { ShortUserModel, UserModel } from './models/user.model';
 
 @Injectable()
 export class AccountService {
 	public constructor(private readonly prismaService: PrismaService) {}
 
-	public async findAll() {
-		const users = await this.prismaService.user.findMany();
+	public async me(userId: string): Promise<UserModel | null> {
+		const user = await this.prismaService.user.findUnique({
+			where: { id: userId },
+		});
 
-		return users;
+		return user;
 	}
 
-	public async create(dto: CreateUserInput) {
+	public async create(dto: CreateUserInput): Promise<ShortUserModel> {
 		const { email, password, username } = dto;
 
 		const isUsernameExists = await this.prismaService.user.findUnique({
@@ -43,6 +46,6 @@ export class AccountService {
 			},
 		});
 
-		return user;
+		return { id: user.id, username: user.username };
 	}
 }
