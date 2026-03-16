@@ -4,7 +4,6 @@ import { NestFactory } from '@nestjs/core';
 import { RedisStore } from 'connect-redis';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
-import { SessionOptions } from 'node:http2';
 
 import { CoreModule } from './core/core.module';
 import { RedisService } from './core/redis/redis.service';
@@ -39,7 +38,7 @@ async function bootstrap() {
 				sameSite: 'lax',
 			},
 			store: new RedisStore({
-				client: redis,
+				client: redis.client,
 				prefix: config.getOrThrow<string>('SESSION_FOLDER'),
 			}),
 		}),
