@@ -1,4 +1,5 @@
 import {
+	ConflictException,
 	Injectable,
 	InternalServerErrorException,
 	NotFoundException,
@@ -9,6 +10,7 @@ import { verify } from 'argon2';
 import { Request } from 'express';
 
 import { PrismaService } from '@/src/core/prisma/prisma.service';
+import { RedisService } from '@/src/core/redis/redis.service';
 import { getSessionMetadata } from '@/src/shared/utils/session-metadata.util';
 
 import { LoginInput } from './inputs/login.input';
@@ -18,7 +20,63 @@ export class SessionService {
 	constructor(
 		private readonly prismaService: PrismaService,
 		private readonly configService: ConfigService,
+		private readonly redisService: RedisService,
 	) {}
+
+	public async findByUser(req: Request) {
+		const userId = req.session.userId;
+
+		if (!userId) {
+			throw new NotFoundException('No active session found');
+		}
+
+		const keys = await this.redisService.client.keys('*');
+
+		if (!keys) {
+			throw new NotFoundException('Session keys are not empty');
+		}
+
+		const userSessions: any[] = [];
+
+		for (const key of keys) {
+			const sessionData = await this.redisService.client.get(key);
+
+			if (sessionData) {
+				const session = JSON.parse(sessionData);
+
+				if (session.userId === userId) {
+					userSessions.push({
+						...session,
+						id: key.split(':')[1],
+					});
+				}
+			}
+		}
+
+		userSessions.sort((a, b) => b.createdAt - a.createdAt);
+
+		return userSessions.filter((session) => session.id !== req.sessionID);
+	}
+
+	public async findCurrent(req: Request) {
+		const sessionId = req.session.id;
+
+		if (!sessionId) {
+			throw new NotFoundException('Session Id not found');
+		}
+
+		const sessionData = await this.redisService.client.get(
+			`${this.configService.getOrThrow<string>('SESSION_FOLDER')}${sessionId}`,
+		);
+ 
+		if (!sessionData) {
+			throw new NotFoundException('Session data not found');
+		}
+
+		const session = JSON.parse(sessionData);
+
+		return { ...session, id: sessionId };
+	}
 
 	public async login(req: Request, dto: LoginInput, userAgent: string) {
 		const { login, password } = dto;
@@ -81,5 +139,25 @@ export class SessionService {
 				resolve(true);
 			});
 		});
+	}
+
+	public async clearSession(req: Request) {
+		req.res?.clearCookie(
+			this.configService.getOrThrow<string>('SESSION_NAME'),
+		);
+
+		return true;
+	}
+
+	public async removeSession(req: Request, sessionId: string) {
+		if (req.session.id === sessionId) {
+			throw new ConflictException('Cannot remove current session');
+		}
+
+		await this.redisService.client.del(
+			`${this.configService.getOrThrow<string>('SESSION_FOLDER')}${sessionId}`,
+		);
+
+		return true;
 	}
 }
